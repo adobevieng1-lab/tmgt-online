@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TMGT LOGISTICS PRO v6.3 (ONLINE)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root { --primary: #1e293b; --accent: #10b981; --warning: #f59e0b; --danger: #ef4444; --bg: #f1f5f9; --text: #334155; --edit: #0ea5e9; --dark: #334155; }
+        body { font-family: 'Sarabun', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        
+        /* Login Overlay */
+        #login-overlay { position: fixed; inset: 0; background: var(--primary); z-index: 9999; display: flex; align-items: center; justify-content: center; color: white; }
+        .login-box { background: white; padding: 30px; border-radius: 15px; color: var(--text); text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 300px; }
+        
+        .container { max-width: 1600px; margin: auto; display: none; } /* ซ่อนไว้ก่อน Login */
+        .header-panel { background: var(--primary); padding: 20px 30px; border-radius: 15px; color: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .action-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+        
+        .btn { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-family: 'Sarabun'; transition: 0.2s; font-size: 14px; }
+        .btn-upload { background: var(--accent); color: white; }
+        .btn-dark { background: var(--dark); color: white; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: white; padding: 15px; border-radius: 12px; border-top: 4px solid var(--accent); text-align: center; cursor: pointer; }
+        
+        .table-container { background: white; border-radius: 12px; overflow: auto; max-height: 600px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+        th { background: #f8fafc; padding: 15px; text-align: left; position: sticky; top: 0; }
+        td { padding: 12px 15px; border-bottom: 1px solid #f1f5f9; }
+        
+        .row-released { background-color: #f0fdf4 !important; }
+        input[type="text"], input[type="password"] { padding: 10px; border-radius: 8px; border: 1px solid #ddd; width: 100%; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<div id="login-overlay">
+    <div class="login-box">
+        <h2>TMGT LOGIN</h2>
+        <p>กรุณาใส่รหัสผ่านเพื่อเข้าใช้งาน</p>
+        <input type="password" id="pass-input" placeholder="รหัสผ่าน...">
+        <button class="btn btn-upload" style="width:100%; margin-top:15px;" onclick="checkLogin()">เข้าสู่ระบบ</button>
+        <p id="login-err" style="color:red; font-size:12px; margin-top:10px; display:none;">รหัสผ่านไม่ถูกต้อง!</p>
+    </div>
+</div>
+
+<div class="container" id="main-app">
+    <div class="header-panel">
+        <div>
+            <h1 style="margin:0; font-size: 20px;">TMGT LOGISTICS ONLINE</h1>
+            <small id="sync-status">🟢 ระบบออนไลน์พร้อมใช้งาน (GitHub)</small>
+        </div>
+        <input type="date" id="dateFilter" onchange="loadData()" style="padding:8px; border-radius:8px; border:none;">
+    </div>
+
+    <div class="action-bar">
+        <input type="file" id="excel-files" style="display:none" multiple>
+        <button class="btn btn-upload" onclick="document.getElementById('excel-files').click()">📥 นำเข้าไฟล์ (A5+)</button>
+        <button class="btn btn-dark" onclick="resetFilter()">📋 ข้อมูลทั้งหมด</button>
+        <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="🔍 ค้นหาทะเบียน, Job, ลูกค้า..." style="flex:1;">
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card" onclick="resetFilter()"><span>ทั้งหมด</span><div id="st-total" style="font-size:22px; font-weight:700;">0</div></div>
+        <div class="stat-card" style="border-top-color: var(--warning)" onclick="setFilter('Pending')"><span>รอปล่อย</span><div id="st-pending" style="font-size:22px; font-weight:700;">0</div></div>
+        <div class="stat-card" style="border-top-color: var(--accent)" onclick="setFilter('Released')"><span>ปล่อยแล้ว</span><div id="st-done" style="font-size:22px; font-weight:700;">0</div></div>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>เวลาเข้า</th><th>Job No.</th><th>ทะเบียนหัว</th><th>ลูกค้า</th><th>เวลาปล่อย</th><th>สถานะ</th><th>จัดการ</th>
+                </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // 🔗 ข้อมูลการเชื่อมต่อ
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxM_QhdnhFP_p2F69F_j17kJV6jzxRyN2BCOxyIlBUJ4jhcKmFUGwqHyG-AEQnf6Hev/exec";
+    const APP_PASS = "1234"; // 🔑 คุณสามารถเปลี่ยนรหัสผ่านตรงนี้ได้
+
+    let db, currentData = [], currentFilter = 'All';
+    const STORE = 'LogisticsData';
+
+    // เช็ค Login
+    function checkLogin() {
+        const pass = document.getElementById('pass-input').value;
+        if(pass === APP_PASS) {
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('main-app').style.display = 'block';
+            initDB();
+        } else {
+            document.getElementById('login-err').style.display = 'block';
+        }
+    }
+
+    // ระบบฐานข้อมูลในเครื่อง
+    function initDB() {
+        const req = indexedDB.open('TMGT_DB', 1);
+        req.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+        req.onsuccess = (e) => { db = e.target.result; loadData(); };
+    }
+
+    // โหลดข้อมูล
+    function loadData() {
+        const date = document.getElementById('dateFilter').value || new Date().toISOString().split('T')[0];
+        document.getElementById('dateFilter').value = date;
+        const tx = db.transaction(STORE, 'readonly');
+        tx.objectStore(STORE).getAll().onsuccess = (e) => {
+            currentData = e.target.result.filter(item => item.uDate === date).sort((a,b) => b.timestamp - a.timestamp);
+            renderTable();
+        };
+    }
+
+    // ส่งข้อมูลออนไลน์
+    async function sync(items) {
+        document.getElementById('sync-status').innerText = "⏳ กำลังซิงค์ข้อมูล...";
+        try {
+            await fetch(SCRIPT_URL, { method: "POST", mode: "no-cors", body: JSON.stringify({ action: "saveAll", items: items }) });
+            document.getElementById('sync-status').innerText = "🟢 ซิงค์ Google Sheets สำเร็จ";
+        } catch (e) { document.getElementById('sync-status').innerText = "🔴 ซิงค์ล้มเหลว"; }
+    }
+
+    // นำเข้าไฟล์ A5+
+    document.getElementById('excel-files').addEventListener('change', async function(e) {
+        const date = document.getElementById('dateFilter').value;
+        const time = new Date().toLocaleTimeString('th-TH', {hour:'2-digit', minute:'2-digit'});
+        let items = [];
+
+        for (let file of e.target.files) {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, {type: 'array'});
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1});
+
+            const tx = db.transaction(STORE, 'readwrite');
+            for (let i = 4; i < rows.length; i++) {
+                if (rows[i][13]) {
+                    const item = {
+                        id: rows[i][1] + "_" + Date.now() + i,
+                        timestamp: Date.now() + i,
+                        uTime: time, uDate: date,
+                        job: rows[i][1] || "-", truck: rows[i][13].toString(),
+                        trailer: rows[i][15] || "-", customer: rows[i][6] || "-",
+                        gateOut: "-", status: "Pending"
+                    };
+                    tx.objectStore(STORE).put(item);
+                    items.push(item);
+                }
+            }
+            tx.oncomplete = () => { sync(items); loadData(); };
+        }
+    });
+
+    function renderTable() {
+        const tbody = document.getElementById('table-body');
+        const search = document.getElementById('searchInput').value.toLowerCase();
+        tbody.innerHTML = '';
+
+        let filtered = currentData.filter(d => (d.truck + d.job + d.customer).toLowerCase().includes(search));
+        if(currentFilter === 'Released') filtered = filtered.filter(d => d.status === 'Released');
+        if(currentFilter === 'Pending') filtered = filtered.filter(d => d.status === 'Pending');
+
+        filtered.forEach(d => {
+            const tr = document.createElement('tr');
+            if(d.status === 'Released') tr.className = 'row-released';
+            tr.innerHTML = `
+                <td>${d.uTime}</td><td>${d.job}</td><td><b>${d.truck}</b></td>
+                <td>${d.customer}</td><td style="color:var(--accent); font-weight:bold;">${d.gateOut}</td>
+                <td>${d.status}</td>
+                <td><button class="btn btn-upload" onclick="release('${d.id}')">🚚 ปล่อย</button></td>`;
+            tbody.appendChild(tr);
+        });
+        document.getElementById('st-total').innerText = currentData.length;
+        document.getElementById('st-done').innerText = currentData.filter(x => x.status === 'Released').length;
+        document.getElementById('st-pending').innerText = currentData.length - currentData.filter(x => x.status === 'Released').length;
+    }
+
+    function release(id) {
+        const tx = db.transaction(STORE, 'readwrite');
+        const store = tx.objectStore(STORE);
+        store.get(id).onsuccess = (e) => {
+            const d = e.target.result;
+            d.status = 'Released';
+            d.gateOut = new Date().toLocaleTimeString('th-TH', {hour:'2-digit', minute:'2-digit'});
+            store.put(d);
+            tx.oncomplete = () => { sync([d]); loadData(); };
+        };
+    }
+
+    function setFilter(f) { currentFilter = f; renderTable(); }
+    function resetFilter() { currentFilter = 'All'; renderTable(); }
+</script>
+</body>
+</html>
